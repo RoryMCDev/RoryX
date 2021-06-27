@@ -5,6 +5,7 @@ import com.earth2me.essentials.economy.EconomyLayer;
 import com.earth2me.essentials.economy.EconomyLayers;
 import com.earth2me.essentials.messaging.IMessageRecipient;
 import com.earth2me.essentials.messaging.SimpleMessageRecipient;
+import com.earth2me.essentials.utils.TriState;
 import com.earth2me.essentials.utils.DateUtil;
 import com.earth2me.essentials.utils.EnumUtil;
 import com.earth2me.essentials.utils.FormatUtil;
@@ -117,8 +118,15 @@ public class User extends UserData implements Comparable<User>, IMessageRecipien
         return isPermSetCheck(node);
     }
 
-    private boolean isAuthorizedCheck(final String node) {
+    /**
+     * Checks if the given permission is explicitly defined and returns its value, otherwise
+     * {@link TriState#UNSET}.
+     */
+    public TriState isAuthorizedExact(final String node) {
+        return isAuthorizedExactCheck(node);
+    }
 
+    private boolean isAuthorizedCheck(final String node) {
         if (base instanceof OfflinePlayer) {
             return false;
         }
@@ -151,6 +159,24 @@ public class User extends UserData implements Comparable<User>, IMessageRecipien
             }
 
             return false;
+        }
+    }
+
+    private TriState isAuthorizedExactCheck(final String node) {
+        if (base instanceof OfflinePlayer) {
+            return TriState.UNSET;
+        }
+
+        try {
+            return ess.getPermissionsHandler().isPermissionSetExact(base, node);
+        } catch (final Exception ex) {
+            if (ess.getSettings().isDebug()) {
+                ess.getLogger().log(Level.SEVERE, "Permission System Error: " + ess.getPermissionsHandler().getName() + " returned: " + ex.getMessage(), ex);
+            } else {
+                ess.getLogger().log(Level.SEVERE, "Permission System Error: " + ess.getPermissionsHandler().getName() + " returned: " + ex.getMessage());
+            }
+
+            return TriState.UNSET;
         }
     }
 
@@ -623,13 +649,15 @@ public class User extends UserData implements Comparable<User>, IMessageRecipien
                     setJailed(false);
                     sendMessage(tl("haveBeenReleased"));
                     setJail(null);
-                    if (ess.getSettings().isTeleportBackWhenFreedFromJail()) {
+                    if (ess.getSettings().getTeleportWhenFreePolicy() == ISettings.TeleportWhenFreePolicy.BACK) {
                         final CompletableFuture<Boolean> future = new CompletableFuture<>();
                         getAsyncTeleport().back(future);
                         future.exceptionally(e -> {
                             getAsyncTeleport().respawn(null, TeleportCause.PLUGIN, new CompletableFuture<>());
                             return false;
                         });
+                    } else if (ess.getSettings().getTeleportWhenFreePolicy() == ISettings.TeleportWhenFreePolicy.SPAWN) {
+                        getAsyncTeleport().respawn(null, TeleportCause.PLUGIN, new CompletableFuture<>());
                     }
                     return true;
                 }
@@ -863,6 +891,9 @@ public class User extends UserData implements Comparable<User>, IMessageRecipien
             if (isAuthorized("essentials.vanish.effect")) {
                 this.getBase().addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, Integer.MAX_VALUE, 1, false));
             }
+            if (ess.getSettings().sleepIgnoresVanishedPlayers()) {
+                getBase().setSleepingIgnored(true);
+            }
         } else {
             for (final Player p : ess.getOnlinePlayers()) {
                 p.showPlayer(getBase());
@@ -871,6 +902,9 @@ public class User extends UserData implements Comparable<User>, IMessageRecipien
             ess.getVanishedPlayersNew().remove(getName());
             if (isAuthorized("essentials.vanish.effect")) {
                 this.getBase().removePotionEffect(PotionEffectType.INVISIBILITY);
+            }
+            if (ess.getSettings().sleepIgnoresVanishedPlayers() && !isAuthorized("essentials.sleepingignored")) {
+                getBase().setSleepingIgnored(false);
             }
         }
     }
